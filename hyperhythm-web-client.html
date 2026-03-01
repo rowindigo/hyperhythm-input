@@ -16,14 +16,11 @@
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
-
-      /* ── YOUR STYLES GO HERE ── */
       background: #000;
       color: #fff;
       font-family: sans-serif;
     }
 
-    /* ── SETUP SCREEN ── */
     #setup-screen {
       position: fixed; inset: 0;
       display: flex;
@@ -32,44 +29,37 @@
       justify-content: center;
       gap: 12px;
 
-      /* ── YOUR STYLES GO HERE ── */
     }
 
     #logo {
-      /* ── YOUR STYLES GO HERE ── */
       width: 280px;
       margin-bottom: 8px;
     }
 
     #ip-input {
-      /* ── YOUR STYLES GO HERE ── */
       font-size: 16px;
       padding: 8px 12px;
     }
 
     #port-input {
-      /* ── YOUR STYLES GO HERE ── */
       font-size: 16px;
       padding: 8px 12px;
       width: 80px;
     }
 
     #connect-btn {
-      /* ── YOUR STYLES GO HERE ── */
       font-size: 18px;
       padding: 10px 28px;
       cursor: pointer;
     }
 
     #status-line {
-      /* ── YOUR STYLES GO HERE ── */
       font-size: 13px;
       min-height: 18px;
     }
 
     #https-warning {
       display: none;
-      /* ── YOUR STYLES GO HERE ── */
       background: red;
       color: white;
       padding: 8px 16px;
@@ -89,7 +79,6 @@
       cursor: crosshair;
       touch-action: none;
 
-      /* ── YOUR STYLES GO HERE ── */
       background: #111;
     }
 
@@ -97,7 +86,6 @@
       position: absolute; bottom: 14px; right: 14px; z-index: 20;
       cursor: pointer;
 
-      /* ── YOUR STYLES GO HERE ── */
       font-size: 13px;
       padding: 7px 16px;
     }
@@ -105,14 +93,12 @@
 </head>
 <body>
 
-  <!-- HTTPS warning banner (auto-shown if on https://) -->
   <div id="https-warning">
-    ⚠ HTTPS blocks local connections.
-    <a id="http-link" href="#" style="color:white; font-weight:bold;">Switch to HTTP</a>
-    to use the game connection.
+    psst,,,,, ur on https...
+    <a id="http-link" href="#" style="color:white; font-weight:bold;">switch to http</a>
+    or connecting wont work,,,
   </div>
 
-  <!-- ── SETUP SCREEN ── -->
   <div id="setup-screen">
 
     <img id="logo" src="hyperhythm_logo.png" alt="HyperRhythm">
@@ -122,20 +108,17 @@
 
     <button id="connect-btn" onclick="connect()">Connect</button>
 
-    <div id="status-line">Enter your PC's local IP address</div>
+    <div id="status-line">enter the displayed ip in game</div>
 
   </div>
 
-  <!-- ── TOUCH SCREEN ── -->
   <div id="touch-screen">
     <div id="touch-area"></div>
-    <button id="back-btn" onclick="disconnect()">Disconnect</button>
   </div>
 
   <script>
     'use strict';
 
-    // ── HTTPS warning ────────────────────────────────────────────────────────
     if (location.protocol === 'https:') {
       const warning = document.getElementById('https-warning');
       const link    = document.getElementById('http-link');
@@ -143,26 +126,20 @@
       warning.style.display = 'block';
     }
 
-    // ── state ────────────────────────────────────────────────────────────────
     let ws          = null;
     let connected   = false;
     let packetCount = 0;
     let mouseDown   = false;
 
-    const MOVE_THROTTLE_MS = 8; // ~125fps max for MOVE events
+    const MOVE_THROTTLE_MS = 8;
     let lastMoveTime = 0;
 
-    // triple-tap to disconnect
-    let tapTimes = [];
-
-    // ── elements ─────────────────────────────────────────────────────────────
     const setupScreen = document.getElementById('setup-screen');
     const touchScreen = document.getElementById('touch-screen');
     const touchArea   = document.getElementById('touch-area');
     const statusLine  = document.getElementById('status-line');
     const connectBtn  = document.getElementById('connect-btn');
 
-    // ── IP/port persistence (session only) ───────────────────────────────────
     const ipEl   = document.getElementById('ip-input');
     const portEl = document.getElementById('port-input');
     try {
@@ -172,7 +149,6 @@
     ipEl.addEventListener('input',   () => { try { sessionStorage.setItem('hr_ip',   ipEl.value);   } catch(_){} });
     portEl.addEventListener('input', () => { try { sessionStorage.setItem('hr_port', portEl.value); } catch(_){} });
 
-    // ── connect ───────────────────────────────────────────────────────────────
     function connect() {
       const ip   = ipEl.value.trim();
       const port = parseInt(portEl.value.trim()) || 8889;
@@ -211,13 +187,6 @@
       };
     }
 
-    function disconnect() {
-      if (ws) { ws.close(); ws = null; }
-      connected = false;
-      showSetupScreen();
-    }
-
-    // ── UI transitions ────────────────────────────────────────────────────────
     function showTouchScreen() {
       setupScreen.style.display = 'none';
       touchScreen.style.display = 'block';
@@ -239,7 +208,6 @@
       statusLine.textContent = msg;
     }
 
-    // ── packet builder (identical schema to Android app) ─────────────────────
     function buildPacket(action, touches, allTouches) {
       const pointers = Array.from(touches).map(t => ({
         x:  t.clientX,
@@ -263,16 +231,9 @@
       }
     }
 
-    // ── touch events ──────────────────────────────────────────────────────────
     touchArea.addEventListener('touchstart', e => {
       e.preventDefault();
       if (!connected) return;
-
-      // Triple-tap to disconnect
-      const now = Date.now();
-      tapTimes.push(now);
-      tapTimes = tapTimes.filter(t => now - t < 600);
-      if (tapTimes.length >= 3) { tapTimes = []; disconnect(); return; }
 
       for (const t of e.changedTouches) {
         send(buildPacket(0, [t], e.touches)); // 0 = DOWN
@@ -304,7 +265,6 @@
       }
     }, { passive: false });
 
-    // ── mouse fallback for desktop testing ────────────────────────────────────
     touchArea.addEventListener('mousedown', e => {
       mouseDown = true;
       if (!connected) return;
@@ -327,7 +287,6 @@
       send(buildPacket(1, fake, []));
     }));
 
-    // ── enter key to connect ──────────────────────────────────────────────────
     document.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !connected) connect();
     });
