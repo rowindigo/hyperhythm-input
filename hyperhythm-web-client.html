@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>HyperRhythm Input</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+
+      /* ── YOUR STYLES GO HERE ── */
+      background: #000;
+      color: #fff;
+      font-family: sans-serif;
+    }
+
+    /* ── SETUP SCREEN ── */
+    #setup-screen {
+      position: fixed; inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+
+      /* ── YOUR STYLES GO HERE ── */
+    }
+
+    #logo {
+      /* ── YOUR STYLES GO HERE ── */
+      width: 280px;
+      margin-bottom: 8px;
+    }
+
+    #ip-input {
+      /* ── YOUR STYLES GO HERE ── */
+      font-size: 16px;
+      padding: 8px 12px;
+    }
+
+    #port-input {
+      /* ── YOUR STYLES GO HERE ── */
+      font-size: 16px;
+      padding: 8px 12px;
+      width: 80px;
+    }
+
+    #connect-btn {
+      /* ── YOUR STYLES GO HERE ── */
+      font-size: 18px;
+      padding: 10px 28px;
+      cursor: pointer;
+    }
+
+    #status-line {
+      /* ── YOUR STYLES GO HERE ── */
+      font-size: 13px;
+      min-height: 18px;
+    }
+
+    #https-warning {
+      display: none;
+      /* ── YOUR STYLES GO HERE ── */
+      background: red;
+      color: white;
+      padding: 8px 16px;
+      text-align: center;
+      font-size: 12px;
+    }
+
+    /* ── TOUCH SCREEN ── */
+    #touch-screen {
+      position: fixed; inset: 0;
+      display: none;
+      touch-action: none;
+    }
+
+    #touch-area {
+      position: absolute; inset: 0;
+      cursor: crosshair;
+      touch-action: none;
+
+      /* ── YOUR STYLES GO HERE ── */
+      background: #111;
+    }
+
+    #back-btn {
+      position: absolute; bottom: 14px; right: 14px; z-index: 20;
+      cursor: pointer;
+
+      /* ── YOUR STYLES GO HERE ── */
+      font-size: 13px;
+      padding: 7px 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HTTPS warning banner (auto-shown if on https://) -->
+  <div id="https-warning">
+    ⚠ HTTPS blocks local connections.
+    <a id="http-link" href="#" style="color:white; font-weight:bold;">Switch to HTTP</a>
+    to use the game connection.
+  </div>
+
+  <!-- ── SETUP SCREEN ── -->
+  <div id="setup-screen">
+
+    <img id="logo" src="hyperhythm_logo.png" alt="HyperRhythm">
+
+    <input id="ip-input"   type="text"   placeholder="192.168.1.100" autocomplete="off" spellcheck="false">
+    <input id="port-input" type="number" placeholder="8889" value="8889" min="1" max="65535">
+
+    <button id="connect-btn" onclick="connect()">Connect</button>
+
+    <div id="status-line">Enter your PC's local IP address</div>
+
+  </div>
+
+  <!-- ── TOUCH SCREEN ── -->
+  <div id="touch-screen">
+    <div id="touch-area"></div>
+    <button id="back-btn" onclick="disconnect()">Disconnect</button>
+  </div>
+
+  <script>
+    'use strict';
+
+    // ── HTTPS warning ────────────────────────────────────────────────────────
+    if (location.protocol === 'https:') {
+      const warning = document.getElementById('https-warning');
+      const link    = document.getElementById('http-link');
+      link.href     = location.href.replace('https://', 'http://');
+      warning.style.display = 'block';
+    }
+
+    // ── state ────────────────────────────────────────────────────────────────
+    let ws          = null;
+    let connected   = false;
+    let packetCount = 0;
+    let mouseDown   = false;
+
+    const MOVE_THROTTLE_MS = 8; // ~125fps max for MOVE events
+    let lastMoveTime = 0;
+
+    // triple-tap to disconnect
+    let tapTimes = [];
+
+    // ── elements ─────────────────────────────────────────────────────────────
+    const setupScreen = document.getElementById('setup-screen');
+    const touchScreen = document.getElementById('touch-screen');
+    const touchArea   = document.getElementById('touch-area');
+    const statusLine  = document.getElementById('status-line');
+    const connectBtn  = document.getElementById('connect-btn');
+
+    // ── IP/port persistence (session only) ───────────────────────────────────
+    const ipEl   = document.getElementById('ip-input');
+    const portEl = document.getElementById('port-input');
+    try {
+      if (sessionStorage.getItem('hr_ip'))   ipEl.value   = sessionStorage.getItem('hr_ip');
+      if (sessionStorage.getItem('hr_port')) portEl.value = sessionStorage.getItem('hr_port');
+    } catch(_) {}
+    ipEl.addEventListener('input',   () => { try { sessionStorage.setItem('hr_ip',   ipEl.value);   } catch(_){} });
+    portEl.addEventListener('input', () => { try { sessionStorage.setItem('hr_port', portEl.value); } catch(_){} });
+
+    // ── connect ───────────────────────────────────────────────────────────────
+    function connect() {
+      const ip   = ipEl.value.trim();
+      const port = parseInt(portEl.value.trim()) || 8889;
+
+      if (!ip) { setStatus('Enter an IP address'); return; }
+
+      setStatus('Connecting…');
+      connectBtn.disabled = true;
+
+      try {
+        ws = new WebSocket(`ws://${ip}:${port}`);
+      } catch(e) {
+        setStatus('Invalid address: ' + e.message);
+        connectBtn.disabled = false;
+        return;
+      }
+
+      ws.onopen = () => {
+        connected = true;
+        send({ action: -1, test: true, timestamp: Date.now() });
+        showTouchScreen();
+      };
+
+      ws.onclose = (e) => {
+        connected = false;
+        if (touchScreen.style.display !== 'none') {
+          showSetupScreen();
+          setStatus('Disconnected (code ' + e.code + ')');
+        }
+        connectBtn.disabled = false;
+      };
+
+      ws.onerror = () => {
+        setStatus('Connection failed — check IP and make sure the game is running');
+        connectBtn.disabled = false;
+      };
+    }
+
+    function disconnect() {
+      if (ws) { ws.close(); ws = null; }
+      connected = false;
+      showSetupScreen();
+    }
+
+    // ── UI transitions ────────────────────────────────────────────────────────
+    function showTouchScreen() {
+      setupScreen.style.display = 'none';
+      touchScreen.style.display = 'block';
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').catch(() => {});
+      }
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    }
+
+    function showSetupScreen() {
+      touchScreen.style.display = 'none';
+      setupScreen.style.display = 'flex';
+      if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    }
+
+    function setStatus(msg) {
+      statusLine.textContent = msg;
+    }
+
+    // ── packet builder (identical schema to Android app) ─────────────────────
+    function buildPacket(action, touches, allTouches) {
+      const pointers = Array.from(touches).map(t => ({
+        x:  t.clientX,
+        y:  t.clientY,
+        id: t.identifier
+      }));
+      return JSON.stringify({
+        action,
+        x:            pointers.length ? pointers[0].x : 0,
+        y:            pointers.length ? pointers[0].y : 0,
+        timestamp:    Date.now(),
+        pointerCount: allTouches.length,
+        pointers
+      });
+    }
+
+    function send(obj) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(typeof obj === 'string' ? obj : JSON.stringify(obj));
+        packetCount++;
+      }
+    }
+
+    // ── touch events ──────────────────────────────────────────────────────────
+    touchArea.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (!connected) return;
+
+      // Triple-tap to disconnect
+      const now = Date.now();
+      tapTimes.push(now);
+      tapTimes = tapTimes.filter(t => now - t < 600);
+      if (tapTimes.length >= 3) { tapTimes = []; disconnect(); return; }
+
+      for (const t of e.changedTouches) {
+        send(buildPacket(0, [t], e.touches)); // 0 = DOWN
+      }
+    }, { passive: false });
+
+    touchArea.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (!connected) return;
+      const now = Date.now();
+      if (now - lastMoveTime < MOVE_THROTTLE_MS) return;
+      lastMoveTime = now;
+      send(buildPacket(2, e.touches, e.touches)); // 2 = MOVE
+    }, { passive: false });
+
+    touchArea.addEventListener('touchend', e => {
+      e.preventDefault();
+      if (!connected) return;
+      for (const t of e.changedTouches) {
+        send(buildPacket(1, [t], e.touches)); // 1 = UP
+      }
+    }, { passive: false });
+
+    touchArea.addEventListener('touchcancel', e => {
+      e.preventDefault();
+      if (!connected) return;
+      for (const t of e.changedTouches) {
+        send(buildPacket(3, [t], e.touches)); // 3 = CANCEL
+      }
+    }, { passive: false });
+
+    // ── mouse fallback for desktop testing ────────────────────────────────────
+    touchArea.addEventListener('mousedown', e => {
+      mouseDown = true;
+      if (!connected) return;
+      const fake = [{ clientX: e.clientX, clientY: e.clientY, identifier: 0 }];
+      send(buildPacket(0, fake, fake));
+    });
+    touchArea.addEventListener('mousemove', e => {
+      if (!mouseDown || !connected) return;
+      const now = Date.now();
+      if (now - lastMoveTime < MOVE_THROTTLE_MS) return;
+      lastMoveTime = now;
+      const fake = [{ clientX: e.clientX, clientY: e.clientY, identifier: 0 }];
+      send(buildPacket(2, fake, fake));
+    });
+    ['mouseup', 'mouseleave'].forEach(evt => touchArea.addEventListener(evt, e => {
+      if (!mouseDown) return;
+      mouseDown = false;
+      if (!connected) return;
+      const fake = [{ clientX: e.clientX, clientY: e.clientY, identifier: 0 }];
+      send(buildPacket(1, fake, []));
+    }));
+
+    // ── enter key to connect ──────────────────────────────────────────────────
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !connected) connect();
+    });
+  </script>
+</body>
+</html>
