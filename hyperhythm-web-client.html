@@ -119,12 +119,18 @@
   <script>
     'use strict';
 
-    if (location.protocol === 'https:') {
-      const warning = document.getElementById('https-warning');
-      const link    = document.getElementById('http-link');
-      link.href     = location.href.replace('https://', 'http://');
-      warning.style.display = 'block';
-    }
+  if (location.protocol === 'https:') {
+    const warning = document.getElementById('https-warning');
+    const link    = document.getElementById('http-link');
+    
+    link.href = '#';
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      location.replace(location.href.replace('https://', 'http://'));
+    });
+  
+  warning.style.display = 'block';
+  }
 
     let ws          = null;
     let connected   = false;
