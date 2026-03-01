@@ -28,7 +28,6 @@
       align-items: center;
       justify-content: center;
       gap: 12px;
-
     }
 
     #logo {
@@ -60,11 +59,17 @@
 
     #https-warning {
       display: none;
-      background: red;
+      background: #b00;
       color: white;
-      padding: 8px 16px;
+      padding: 10px 16px;
       text-align: center;
-      font-size: 12px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    #https-warning a {
+      color: #ffd;
+      font-weight: bold;
     }
 
     /* ── TOUCH SCREEN ── */
@@ -78,14 +83,12 @@
       position: absolute; inset: 0;
       cursor: crosshair;
       touch-action: none;
-
       background: #111;
     }
 
     #back-btn {
       position: absolute; bottom: 14px; right: 14px; z-index: 20;
       cursor: pointer;
-
       font-size: 13px;
       padding: 7px 16px;
     }
@@ -94,9 +97,9 @@
 <body>
 
   <div id="https-warning">
-    psst,,,,, ur on https...
-    <a id="http-link" href="#" style="color:white; font-weight:bold;">switch to http</a>
-    or connecting wont work,,,
+    ur on https — to connect, you need to trust the game's certificate first:<br>
+    <a id="cert-link" href="#" target="_blank">tap here to open the game's cert page</a>
+    (accept the warning), then come back and hit connect,,,
   </div>
 
   <div id="setup-screen">
@@ -119,19 +122,38 @@
   <script>
     'use strict';
 
-  if (location.protocol === 'https:') {
-    const warning = document.getElementById('https-warning');
-    const link    = document.getElementById('http-link');
-    
-    link.href = '#';
-    link.addEventListener('click', (e) => {
-      e.preventDefault();
-      location.replace(location.href.replace('https://', 'http://'));
-    });
-  
-  warning.style.display = 'block';
-  }
+    const setupScreen = document.getElementById('setup-screen');
+    const touchScreen = document.getElementById('touch-screen');
+    const touchArea   = document.getElementById('touch-area');
+    const statusLine  = document.getElementById('status-line');
+    const connectBtn  = document.getElementById('connect-btn');
+    const ipEl        = document.getElementById('ip-input');
+    const portEl      = document.getElementById('port-input');
+    const certLink    = document.getElementById('cert-link');
+    const httpsWarn   = document.getElementById('https-warning');
 
+    // ── Restore saved IP/port ──────────────────────────────────────────────
+    try {
+      if (sessionStorage.getItem('hr_ip'))   ipEl.value   = sessionStorage.getItem('hr_ip');
+      if (sessionStorage.getItem('hr_port')) portEl.value = sessionStorage.getItem('hr_port');
+    } catch(_) {}
+
+    ipEl.addEventListener('input',   () => { try { sessionStorage.setItem('hr_ip',   ipEl.value);   } catch(_){} updateCertLink(); });
+    portEl.addEventListener('input', () => { try { sessionStorage.setItem('hr_port', portEl.value); } catch(_){} updateCertLink(); });
+
+    // ── HTTPS warning + cert trust link ────────────────────────────────────
+    function updateCertLink() {
+      const ip   = ipEl.value.trim() || '192.168.1.x';
+      const port = portEl.value.trim() || '8889';
+      certLink.href = `https://${ip}:${port}`;
+    }
+
+    if (location.protocol === 'https:') {
+      httpsWarn.style.display = 'block';
+      updateCertLink();
+    }
+
+    // ── WebSocket state ────────────────────────────────────────────────────
     let ws          = null;
     let connected   = false;
     let packetCount = 0;
@@ -140,32 +162,20 @@
     const MOVE_THROTTLE_MS = 8;
     let lastMoveTime = 0;
 
-    const setupScreen = document.getElementById('setup-screen');
-    const touchScreen = document.getElementById('touch-screen');
-    const touchArea   = document.getElementById('touch-area');
-    const statusLine  = document.getElementById('status-line');
-    const connectBtn  = document.getElementById('connect-btn');
-
-    const ipEl   = document.getElementById('ip-input');
-    const portEl = document.getElementById('port-input');
-    try {
-      if (sessionStorage.getItem('hr_ip'))   ipEl.value   = sessionStorage.getItem('hr_ip');
-      if (sessionStorage.getItem('hr_port')) portEl.value = sessionStorage.getItem('hr_port');
-    } catch(_) {}
-    ipEl.addEventListener('input',   () => { try { sessionStorage.setItem('hr_ip',   ipEl.value);   } catch(_){} });
-    portEl.addEventListener('input', () => { try { sessionStorage.setItem('hr_port', portEl.value); } catch(_){} });
-
     function connect() {
       const ip   = ipEl.value.trim();
       const port = parseInt(portEl.value.trim()) || 8889;
 
       if (!ip) { setStatus('Enter an IP address'); return; }
 
+      // Use wss:// on https pages, ws:// on http pages
+      const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+
       setStatus('Connecting…');
       connectBtn.disabled = true;
 
       try {
-        ws = new WebSocket(`ws://${ip}:${port}`);
+        ws = new WebSocket(`${scheme}://${ip}:${port}`);
       } catch(e) {
         setStatus('Invalid address: ' + e.message);
         connectBtn.disabled = false;
@@ -188,7 +198,11 @@
       };
 
       ws.onerror = () => {
-        setStatus('Connection failed — check IP and make sure the game is running');
+        if (location.protocol === 'https:') {
+          setStatus('Connection failed — did you trust the certificate? (tap the link above)');
+        } else {
+          setStatus('Connection failed — check IP and make sure the game is running');
+        }
         connectBtn.disabled = false;
       };
     }
@@ -237,10 +251,10 @@
       }
     }
 
+    // ── Touch events ───────────────────────────────────────────────────────
     touchArea.addEventListener('touchstart', e => {
       e.preventDefault();
       if (!connected) return;
-
       for (const t of e.changedTouches) {
         send(buildPacket(0, [t], e.touches)); // 0 = DOWN
       }
@@ -271,6 +285,7 @@
       }
     }, { passive: false });
 
+    // ── Mouse events (desktop testing) ────────────────────────────────────
     touchArea.addEventListener('mousedown', e => {
       mouseDown = true;
       if (!connected) return;
